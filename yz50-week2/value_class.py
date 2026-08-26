@@ -2,27 +2,46 @@ from graphiz import draw_dot
 import math
 
 class Value():
+    
     def __init__(self, data, _op= "", _children=(), _label=""):
         self.data = data
         self._prev = set(_children)
         self._op = _op
         self.grad = 0
         self._label = _label
-
+        self._backward = lambda : None
+    
     def __repr__(self):
         return f"Value(data={self.data})"
 
     def __add__(self, other):
-        return Value(self.data + other.data, _op="+", _children=(self, other))
+        out = Value(self.data + other.data, _op="+", _children=(self, other))
+        def _backward():
+            self.grad += out.grad
+            other.grad += out.grad
+        out._backward = _backward
+        return out
         
 
     def __mul__(self,other):
-        return Value(self.data * other.data, _op="*", _children=(self, other))
+        out = Value(self.data * other.data, _op="*", _children=(self, other))
+        def _backward():
+            self.grad += out.grad * other.data
+            other.grad += out.grad * self.data
+        out._backward = _backward
+        return out
 
     def tanh(self):
         x = self.data
         v = (math.exp(x*2) - 1)/ (math.exp(2*x) + 1)
-        return Value(v, _children=(self, ))
+        out = Value(v, _op = "tanh", _children=(self, ))
+
+        def _backward():
+            self.grad = (1 - v ** 2) * out.grad
+        out._backward = _backward
+        return out 
+
+
 
 a = Value(2, _label="a")
 b = Value(-3, _label="b")

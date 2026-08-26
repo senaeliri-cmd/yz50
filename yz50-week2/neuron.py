@@ -27,20 +27,21 @@ a1w1a2w2._label = "a1w1a2w2"
 n = a1w1a2w2 + b ; n._label = "n"
 o = n.tanh(); o._label = "o"
 
-o.grad = 1
-n.grad = 0.613
-a1w1a2w2.grad = 0.613
-b.grad = 0.613
-a2w2.grad = 0.613
-a1w1.grad = 0.613
-a2.grad = w2.data * a2w2.grad
-w2.grad = a2.data * a2w2.grad
-a1.grad = w1.data * a1w1.grad
-w1.grad = a1.data * a1w1.grad
+# Görev ikide kullanılan manuel gradientlar
+#o.grad = 1
+#n.grad = 0.613
+#a1w1a2w2.grad = 0.613
+#b.grad = 0.613
+#a2w2.grad = 0.613
+#a1w1.grad = 0.613
+#a2.grad = w2.data * a2w2.grad
+#w2.grad = a2.data * a2w2.grad
+#a1.grad = w1.data * a1w1.grad
+#w1.grad = a1.data * a1w1.grad
 
 
 
-print()
+
 
 graph = draw_dot(o)
 graph.view()
