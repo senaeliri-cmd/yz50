@@ -1,4 +1,5 @@
 from graphiz import draw_dot
+import math
 
 class Value():
     def __init__(self, data, _op= "", _children=(), _label=""):
@@ -18,6 +19,11 @@ class Value():
     def __mul__(self,other):
         return Value(self.data * other.data, _op="*", _children=(self, other))
 
+    def tanh(self):
+        x = self.data
+        v = (math.exp(x*2) - 1)/ (math.exp(2*x) + 1)
+        return Value(v, _children=(self, ))
+
 a = Value(2, _label="a")
 b = Value(-3, _label="b")
 d = Value(5, _label="d")
@@ -36,8 +42,7 @@ c.grad = 5.00
 d.grad = -6.00
 g.grad = 1.00
 e.grad = 1.00
-dot = draw_dot(f)
-dot.view("graph")
+
 
 def test():
     h = 0.001
