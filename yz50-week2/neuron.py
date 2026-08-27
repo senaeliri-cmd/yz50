@@ -25,7 +25,8 @@ a1w1a2w2 = a1w1 + a2w2
 a1w1a2w2._label = "a1w1a2w2"
 
 n = a1w1a2w2 + b ; n._label = "n"
-o = n.tanh(); o._label = "o"
+e = (2*n).exp()
+o = (e - 1) / (e + 1); o._label = "o"
 
 # Görev ikide kullanılan manuel gradient
 #o.grad = 1
@@ -40,6 +41,8 @@ o = n.tanh(); o._label = "o"
 #w1.grad = a1.data * a1w1.grad
 
 
+
+#o.backward()
 
 o.backward()
 
