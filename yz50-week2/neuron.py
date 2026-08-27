@@ -27,7 +27,7 @@ a1w1a2w2._label = "a1w1a2w2"
 n = a1w1a2w2 + b ; n._label = "n"
 o = n.tanh(); o._label = "o"
 
-# Görev ikide kullanılan manuel gradientlar
+# Görev ikide kullanılan manuel gradient
 #o.grad = 1
 #n.grad = 0.613
 #a1w1a2w2.grad = 0.613
@@ -41,7 +41,7 @@ o = n.tanh(); o._label = "o"
 
 
 
-
+o.backward()
 
 graph = draw_dot(o)
 graph.view()

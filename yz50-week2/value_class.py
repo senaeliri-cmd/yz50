@@ -41,6 +41,31 @@ class Value():
         out._backward = _backward
         return out 
 
+    def backward(self):
+        frontier = []
+        visited = set()
+
+        def build_topo(L):
+
+            if(L == None):
+                return
+
+            if L not in visited:
+                visited.add(L)
+
+                childs = L._prev
+
+                for child in childs:
+                    build_topo(child)
+
+                frontier.append(L)
+
+        build_topo(self)
+
+        self.grad = 1.0
+
+        for n in reversed(frontier):
+            n._backward()
 
 
 a = Value(2, _label="a")
