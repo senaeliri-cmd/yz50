@@ -44,7 +44,7 @@ o = (e - 1) / (e + 1); o._label = "o"
 
 #o.backward()
 
-o.backward()
+o.backward
 
 graph = draw_dot(o)
 graph.view()
