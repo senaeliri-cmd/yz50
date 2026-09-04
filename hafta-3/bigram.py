@@ -30,4 +30,23 @@ for i in range(27):
         plt.text(j, i, d[i, j].item(), ha="center", va = "top",color='black' )
 
 plt.axis('off')
-plt.show()
+#plt.show()
+
+P = d.float()
+P = P/P.sum(1, keepdim=True)
+
+g = torch.Generator().manual_seed(2147483647)
+
+for _ in range(3):
+    xi = 0
+    out = []
+    while True:
+        p = P[xi]
+
+        xi = torch.multinomial(p, num_samples=1, replacement= True,generator= g).item()
+        out.append(itos[xi])
+
+        if(xi == 0):
+            break
+    print(''.join(out))
+        
