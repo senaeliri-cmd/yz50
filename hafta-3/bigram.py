@@ -32,7 +32,7 @@ for i in range(27):
 plt.axis('off')
 #plt.show()
 
-P = d.float()
+P = (d+1).float()
 P = P/P.sum(1, keepdim=True)
 
 g = torch.Generator().manual_seed(2147483647)
