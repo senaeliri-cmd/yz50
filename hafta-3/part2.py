@@ -1,8 +1,8 @@
 import torch
-from bigram import words, stoi
+from bigram import words_tr, stoi, length
 xs, ys = [], []
 
-for word in words:
+for word in words_tr:
     word = ['.'] + list(word) + ['.']
     for ch1, ch2 in zip(word, word[1:]):
         i_of_ch1 = stoi[ch1]
@@ -14,15 +14,13 @@ for word in words:
 xs = torch.tensor(xs)
 ys = torch.tensor(ys)
 num = xs.nelement() 
-print(num)
-print(len(words)) 
     
 
 g = torch.Generator().manual_seed(2147483647)
-W = torch.randn((27,27), generator=g, requires_grad= True)
+W = torch.randn((length,length), generator=g, requires_grad= True)
 F = torch.nn.functional
 
-xenc = F.one_hot(xs, num_classes=27).float()
+xenc = F.one_hot(xs, num_classes=length).float()
 
 
 for k in range(200):
