@@ -2,8 +2,8 @@ import torch
 from bigram import words,stoi, P
 log_likelihood = 0.0
 n = 0
-
-for word in words[:3]:
+words_local = ["sena", "seda", "erva"]
+for word in words_local:
     word = ['.'] + list(word) + ['.']
     for ch1, ch2 in zip(word, word[1:]):
         i_of_ch1 = stoi[ch1]
