@@ -30,6 +30,7 @@ for k in range(200):
 
     loss = -probs[torch.arange(num), ys].log().mean()
     print(loss.item())
+    
     W.grad = None
     loss.backward()
     W.data += -20.0 * W.grad
