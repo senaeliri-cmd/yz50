@@ -1,6 +1,5 @@
 import torch
 import matplotlib.pyplot as plt
-import build_dataset
 import random
 import torch.nn.functional as F
 
@@ -35,9 +34,27 @@ random.shuffle(words)
 n1 = int(len(words) * 0.8)
 n2 = int(len(words) * 0.9)
 
-Xtr, Ytr = build_dataset.build_dataset(words[:n1])
-Xdev, Ydev = build_dataset.build_dataset(words[n1:n2])
-Xte, Yte = build_dataset.build_dataset(words[n2:])
+def build_dataset(words):
+    X, Y = [], []
+    for word in words:
+        adjent = [0 for _ in range(base_num)]
+   
+        word += '.'
+        for ch in word:
+            ix = stoi[ch]
+            X.append(adjent)
+            Y.append(ix)
+            adjent = adjent[1:] + [ix]
+        
+    X = torch.tensor(X)
+    Y = torch.tensor(Y)
+
+    return X, Y
+
+
+Xtr, Ytr = build_dataset(words[:n1])
+Xdev, Ydev = build_dataset(words[n1:n2])
+Xte, Yte = build_dataset(words[n2:])
 
 
 
@@ -58,10 +75,16 @@ a = emb.view(-1, emb_size * base_num)
 
 
 W1 = torch.randn((b,n_hidden), generator=g) * (5/3) / (b**0.5)
-B1 = torch.randn((n_hidden), generator=g) * 0.1
+#B1 = torch.randn((n_hidden), generator=g) * 0.1
 W2= torch.randn((n_hidden, len(chars)), generator=g) * 0.01
 B2 = torch.randn((len(chars)), generator=g) * 0
-parameteres = [C, W1, B1, W2, B2]
+
+bngain = torch.ones(1, n_hidden)
+bnbias = torch.zeros(1, n_hidden)
+bn_running_mean = torch.zeros(1, n_hidden)
+bn_running_std = torch.ones(1, n_hidden)
+
+parameteres = [C, W1, W2, B2, bngain, bnbias]
 
 for p in parameteres:
    p.requires_grad=True
@@ -74,9 +97,7 @@ for p in parameteres:
 
 #New Method
 batch_size = 32
-h = torch.tanh(a @ W1 + B1)
-logits = h @ W2 + B2
-Xi = torch.randint(0, Xtr.shape[0], (batch_size,))
+
 
 
 lre = torch.linspace(-3, 0, 1000)
@@ -84,40 +105,59 @@ lrs = 10**lre
 lri =[]
 losses = []
 
-bngain = torch.ones(1, n_hidden)
-bnbias = torch.zeros(1, n_hidden)
-bn_running_mean = torch.zeros(1, n_hidden)
-bn_running_std = torch.ones(1, n_hidden)
 
-for i in range(200000):
-   #lr = lrs[i]
-   Xi = torch.randint(0, Xtr.shape[0], (batch_size,))
-   emb = C[Xtr[Xi]] # (32, 3, 2)
-   hpreact = emb.view(-1, b) @ W1 + B1
-   bnmean = hpreact.mean(0, keepdim=True)
-   bnstd = hpreact.std(0, keepdim=True)
 
-   with torch.no_grad():
-      bn_running_mean = 0.999 *bn_running_mean + 0.001* bnmean
-      bn_running_std = 0.999 * bn_running_std + 0.001 * bnstd
+def train_dataset():
+   global bn_running_mean, bn_running_std
+   for i in range(200000):
+      #lr = lrs[i]
+      Xi = torch.randint(0, Xtr.shape[0], (batch_size,))
+      emb = C[Xtr[Xi]] # (32, 3, 2)
+      hpreact = emb.view(-1, b) @ W1
+      bnmean = hpreact.mean(0, keepdim=True)
+      bnstd = hpreact.std(0, keepdim=True)
 
-   hpreact = (bngain * (hpreact - bnmean) / (bnstd)) + (bnbias)
-   h = torch.tanh(hpreact) #(32, 200)
-   logits = h @ W2 + B2 #(32, 27)
+      with torch.no_grad():
+         bn_running_mean = 0.999 *bn_running_mean + 0.001* bnmean
+         bn_running_std = 0.999 * bn_running_std + 0.001 * bnstd
 
-   loss = F.cross_entropy(logits, Ytr[Xi])
+      hpreact = (bngain * (hpreact - bnmean) / (bnstd)) + (bnbias)
+      h = torch.tanh(hpreact) #(32, 200)
+      logits = h @ W2 + B2 #(32, 27)
 
-   for p in parameteres:
-      p.grad = None
-   loss.backward()
+      loss = F.cross_entropy(logits, Ytr[Xi])
 
-   #lri.append(lre[i])
-   #losses.append(loss.item())
-   lr = 0.1 if i < 100000 else 0.01
-   for p in parameteres:
-      p.data += - lr * p.grad
+      for p in parameteres:
+         p.grad = None
+      loss.backward()
 
-   
+      #lri.append(lre[i])
+      #losses.append(loss.item())
+      lr = 0.1 if i < 100000 else 0.01
+      for p in parameteres:
+         p.data += - lr * p.grad
+   checkpoints = {
+   'C': C,
+   'W1' : W1,
+   'W2' : W2,
+   'B2' : B2,
+   'bngain' : bngain,
+   'bnbias' :bnbias,
+   'bn_running_mean' : bn_running_mean,
+   'bn_running_std' : bn_running_std
+   }
+   torch.save(checkpoints, "model.pt")
+
+
+
+def main():
+   checkpoints = torch.load("model.pt")
+   sample_name(checkpoints['C'],checkpoints['W1'],checkpoints['W2'],checkpoints['B2'],checkpoints['bngain'],checkpoints['bnbias'], 
+   checkpoints['bn_running_mean'], checkpoints['bn_running_std'])
+   split_loss('train', checkpoints['C'],checkpoints['W1'],checkpoints['W2'],checkpoints['B2'],checkpoints['bngain'],checkpoints['bnbias'], 
+   checkpoints['bn_running_mean'], checkpoints['bn_running_std'])
+   split_loss('develop', checkpoints['C'],checkpoints['W1'],checkpoints['W2'],checkpoints['B2'],checkpoints['bngain'],checkpoints['bnbias'], 
+   checkpoints['bn_running_mean'], checkpoints['bn_running_std'])
 
 #plt.figure(figsize=(20,10))
 #plt.imshow(h.abs() > 0.99, cmap='gray', interpolation='nearest')
@@ -126,7 +166,7 @@ for i in range(200000):
 #plt.plot(lri, losses)
 #plt.show()
 
-def sample_name():
+def sample_name(C, W1, W2, B2, bngain, bnbias, bn_running_mean, bn_running_std):
    for _ in range(10):
       context = [0] * base_num
       out = []
@@ -144,7 +184,7 @@ def sample_name():
       print(''.join(out))
 
 @torch.no_grad()
-def split_loss(split):
+def split_loss(split, C, W1, W2, B2, bngain, bnbias, bn_running_mean, bn_running_std):
    x, y = {
       'train': (Xtr, Ytr), 
       'develop' : (Xdev, Ydev),
@@ -159,12 +199,10 @@ def split_loss(split):
    loss = F.cross_entropy(logits, y)
    print(f"{split} ---> {loss.item()}")
 
+#train_dataset()
+main()
 
-sample_name()
-split_loss('train')
-split_loss('develop')
-split_loss('test')
-
+# Bigram Loss  -> 2.499
 
 # Baseline - 10,000 iterations
 # Train Loss   -> 2.3658
@@ -189,5 +227,5 @@ split_loss('test')
 # Dev Loss     -> 2.1054
 
 # After batch-nom
-# Train Loss   -> 2.0893
-# Dev Loss     -> 2.1237
+# Train Loss   -> 1.9278
+# Dev Loss     -> 2.0260
