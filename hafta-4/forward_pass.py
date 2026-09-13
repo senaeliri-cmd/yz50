@@ -5,7 +5,7 @@ import random
 import torch.nn.functional as F
 
 
-words = open('names.txt', 'r').read().splitlines()
+words = open('names_tr_augmented.txt', 'r').read().splitlines()
 
 chars = sorted(set(''.join(words)))
 chars.insert(0, '.')
@@ -160,7 +160,7 @@ def split_loss(split):
    print(f"{split} ---> {loss.item()}")
 
 
-
+sample_name
 split_loss('train')
 split_loss('develop')
 split_loss('test')
@@ -189,5 +189,5 @@ split_loss('test')
 # Dev Loss     -> 2.1054
 
 # After batch-nom
-# Train Loss   -> 2.089315414428711
-# Dev Loss     -> 2.1237263679504395
+# Train Loss   -> 2.0893
+# Dev Loss     -> 2.1237
