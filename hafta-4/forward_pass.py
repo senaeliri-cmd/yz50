@@ -160,7 +160,7 @@ def split_loss(split):
    print(f"{split} ---> {loss.item()}")
 
 
-sample_name
+sample_name()
 split_loss('train')
 split_loss('develop')
 split_loss('test')
