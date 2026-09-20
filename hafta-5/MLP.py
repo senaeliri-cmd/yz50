@@ -46,7 +46,7 @@ def build_dataset(words):
     return torch.tensor(X_l), torch.tensor(Y_l)
 
 n1 = int(len(words) * 0.8)
-n2 = int(len(words) * 0.1)
+n2 = int(len(words) * 0.9)
 
 Xtr, Ytr = build_dataset(words[:n1])
 Xdev,Ydev = build_dataset(words[n1:n2])
@@ -119,21 +119,20 @@ for t in [logprobs, probs, counts_sum_inv, counts_sum, counts, norm_logits, logi
 loss.backward()
 
 
-dlogprobs = torch.zeros_like(logprobs)
-dlogprobs[range(batch_size), Y_minib] = -1.0/(batch_size)
-dprobs = (1.0/probs)*dlogprobs
-dcounts = counts_sum_inv * dprobs
-dcounts_sum_inv = (dprobs * counts).sum(1, keepdim=True)
-dcounts_sum = dcounts_sum_inv * (-counts_sum**-2)
-dcounts = torch.ones_like(counts)* dcounts_sum + dprobs * counts_sum_inv
-dnorm_logits = dcounts * counts
+#dlogprobs = torch.zeros_like(logprobs)
+#dlogprobs[range(batch_size), Y_minib] = -1.0/(batch_size)
+#dprobs = (1.0/probs)*dlogprobs
+#dcounts = counts_sum_inv * dprobs
+#dcounts_sum_inv = (dprobs * counts).sum(1, keepdim=True)
+#dcounts_sum = dcounts_sum_inv * (-counts_sum**-2)
+#dcounts = torch.ones_like(counts)* dcounts_sum + dprobs * counts_sum_inv
+#dnorm_logits = dcounts * counts
 #dlogits = dnorm_logits.clone()
-dlogit_maxes = (-dnorm_logits).sum(1, keepdim=True)
+#dlogit_maxes = (-dnorm_logits).sum(1, keepdim=True)
 #dlogits += F.one_hot(logits.max(1).indices, num_classes=logits.shape[1])*dlogit_maxes
 dlogits = F.softmax(logits, 1)
 dlogits[range(batch_size), Y_minib] -=1
 dlogits/= batch_size
-dlogits = (probs - F.one_hot(Y_minib, num_classes=probs.shape[1])) / batch_size
 dB2 = dlogits.sum(0, keepdim=True)
 dW2 = h.T@dlogits
 dh = dlogits@W2.T
@@ -149,6 +148,7 @@ dbndiff += dbndiff2 *2*bndiff
 dhprebn = dbndiff.clone()
 dbnmean = -dbndiff.clone().sum(0, keepdim=True)
 dhprebn += (batch_size**-1)* torch.ones_like(hprebn) *dbnmean
+
 dembcat = dhprebn@W1.T
 dW1 = embcat.T@dhprebn
 dB1 = dhprebn.clone().sum(0, keepdim=True)
@@ -161,13 +161,13 @@ for k in range(X_minib.shape[0]):
 
 
 
-cmp("logprobs", dlogprobs, logprobs)
-cmp("dprobs", dprobs, probs)
-cmp("dcounts_sum", dcounts_sum, counts_sum)
-cmp("dcounts", dcounts, counts)
-cmp("dnorm_logits", dnorm_logits, norm_logits)
+#cmp("logprobs", dlogprobs, logprobs)
+#cmp("dprobs", dprobs, probs)
+#cmp("dcounts_sum", dcounts_sum, counts_sum)
+#cmp("dcounts", dcounts, counts)
+#cmp("dnorm_logits", dnorm_logits, norm_logits)
 cmp("dlogits", dlogits, logits)
-cmp("dlogit_maxes", dlogit_maxes, logit_maxes)
+#cmp("dlogit_maxes", dlogit_maxes, logit_maxes)
 cmp("B2", dB2, B2)
 cmp("W2", dW2, W2)
 cmp("h", dh, h)
