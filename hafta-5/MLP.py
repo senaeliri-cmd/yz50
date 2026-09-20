@@ -72,7 +72,7 @@ B2 = torch.randn(len(chars),                        generator=g) * 0.1
 bn_gain = torch.randn(1, n_hidden) * 0.1 + 1.0
 bn_bias = torch.randn(1, n_hidden) * 0.1
 
-parameteres = [W1, B1, W2, B2, bn_gain, bn_bias]
+parameteres = [W1, B1, W2, B2, C, bn_gain, bn_bias]
 
 for p in parameteres:
     p.requires_grad = True
@@ -83,15 +83,18 @@ bn_runningbias = torch.zeros(1, n_hidden)
 
 ix = torch.randint(0, Xtr.shape[0], (batch_size, ), generator=g)
 X_minib, Y_minib = Xtr[ix], Ytr[ix]
-emb = C[X_minib]
-embcat = emb.view(emb.shape[0], -1)
-hprebn = embcat @ W1 + B1
 
-bnmean = (1/batch_size) * (hprebn.sum(0, keepdim=True))
-bndiff = hprebn - bnmean
-bndiff2 = bndiff ** 2
-bnvar = 1/(batch_size-1)*(bndiff).sum(0, keepdim=True)
-bnvar_inv =(bnvar + 1e-5)**-0.5
+emb = C[X_minib]
+#emb shape: ([32, 3, 10]), C: ([27, 10]) X_minib: ([32, 3])
+embcat = emb.view(emb.shape[0], -1) 
+
+hprebn = embcat @ W1 + B1 # embcat size(32, 30) hprebn size (32,200)
+
+bnmean = (1/batch_size) * (hprebn.sum(0, keepdim=True)) # bnmean size(1,200)
+bndiff = hprebn -bnmean # bndiff size(32,200)
+bndiff2 = bndiff ** 2 #bndiff2 size (32, 200)
+bnvar = 1/(batch_size-1)*(bndiff2).sum(0, keepdim=True) # bnvar size (1, 200)
+bnvar_inv =(bnvar + 1e-5)**-0.5 # bnvar_inv size (1, 200)
 bnraw =bndiff *bnvar_inv
 hpreact = bn_gain * bnraw + bn_bias
 
@@ -110,7 +113,8 @@ loss = -logprobs[range(batch_size), Y_minib].mean()
 
 for p in parameteres:
     p.grad = None
-for t in [logprobs, probs, counts_sum_inv, counts_sum, counts, norm_logits, logit_maxes, h, hpreact, bnraw, bndiff,bnvar_inv, logits]:
+for t in [logprobs, probs, counts_sum_inv, counts_sum, counts, norm_logits, logit_maxes, h, hpreact, hprebn, bnraw, bndiff, bndiff2,
+             embcat, emb, bnvar, bnmean, bnvar_inv, logits]:
     t.retain_grad()
 loss.backward()
 
@@ -123,9 +127,13 @@ dcounts_sum_inv = (dprobs * counts).sum(1, keepdim=True)
 dcounts_sum = dcounts_sum_inv * (-counts_sum**-2)
 dcounts = torch.ones_like(counts)* dcounts_sum + dprobs * counts_sum_inv
 dnorm_logits = dcounts * counts
-dlogits = dnorm_logits.clone()
+#dlogits = dnorm_logits.clone()
 dlogit_maxes = (-dnorm_logits).sum(1, keepdim=True)
-dlogits += F.one_hot(logits.max(1).indices, num_classes=logits.shape[1])*dlogit_maxes
+#dlogits += F.one_hot(logits.max(1).indices, num_classes=logits.shape[1])*dlogit_maxes
+dlogits = F.softmax(logits, 1)
+dlogits[range(batch_size), Y_minib] -=1
+dlogits/= batch_size
+dlogits = (probs - F.one_hot(Y_minib, num_classes=probs.shape[1])) / batch_size
 dB2 = dlogits.sum(0, keepdim=True)
 dW2 = h.T@dlogits
 dh = dlogits@W2.T
@@ -133,8 +141,24 @@ dhpreact = dh * (1-h**2)
 dbn_gain = (bnraw * dhpreact).sum(0)
 dbn_bias = dhpreact.sum(0)
 dbnraw = (dhpreact * bn_gain)
-dbndiff = dbnraw * bnvar_inv
+dbndiff = (dbnraw * bnvar_inv)
 dbnvar_inv = (dbnraw * bndiff).sum(0, keepdim=True)
+dbnvar = ((dbnvar_inv) * -0.5 * (bnvar + 1e-5)**-1.5)
+dbndiff2 = dbnvar * (batch_size-1)**-1.0 * torch.ones_like(bndiff2)
+dbndiff += dbndiff2 *2*bndiff
+dhprebn = dbndiff.clone()
+dbnmean = -dbndiff.clone().sum(0, keepdim=True)
+dhprebn += (batch_size**-1)* torch.ones_like(hprebn) *dbnmean
+dembcat = dhprebn@W1.T
+dW1 = embcat.T@dhprebn
+dB1 = dhprebn.clone().sum(0, keepdim=True)
+demb = dembcat.view(emb.shape)
+dC = torch.zeros_like(C)
+for k in range(X_minib.shape[0]):
+    for s in range(X_minib.shape[1]):
+        ix = X_minib[k,s]
+        dC[ix] += demb[k, s]
+
 
 
 cmp("logprobs", dlogprobs, logprobs)
@@ -152,4 +176,14 @@ cmp("dbn_gain", dbn_gain, bn_gain)
 cmp("dbn_bias", dbn_bias, bn_bias)
 cmp("dbnraw", dbnraw, bnraw)
 cmp("dbndiff", dbndiff, bndiff)
+cmp("dbndiff2", dbndiff2, bndiff2)
 cmp("dbnvar_inv", dbnvar_inv, bnvar_inv)
+cmp("dbnvar", dbnvar, bnvar)
+cmp("dhprebn", dhprebn, hprebn)
+cmp("dbnmean", dbnmean, bnmean)
+cmp("dembcat", dembcat, embcat)
+cmp("dW1", dW1, W1)
+cmp("dB1", dB1, B1)
+cmp("demb", demb, emb)
+cmp("dC", dC, C)
+cmp("dlogits", dlogits,logits)
