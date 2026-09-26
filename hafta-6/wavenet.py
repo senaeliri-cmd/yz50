@@ -54,6 +54,43 @@ class Tanh():
     def parameters(self):
         return []
 
+class Embedding():
+    def __init__(self, emb_size, emb_dim):
+        self.weights = torch.randn(emb_size, emb_dim)
+    
+    def __call__(self, iX):
+        self.out = self.weights[iX]
+        return self.out
+    
+    def parameters(self):
+        return [self.weights]
+
+class FlattenConsecutive():
+    def __init__(self, n_context):
+        self.n = n_context
+
+    def __call__(self, x):
+        B, C, V = x.shape
+        self.out = x.view(B, C//self.n, V * self.n)
+        if self.out.shape[1] == 1:
+            self.out = self.out.squeeze(1)
+        return self.out
+
+    def parameters(self):
+        return []
+
+class Sequential():
+    def __init__(self, x):
+        self.layers = x
+    def __call__(self, x):
+        self.out = x
+        for layer in self.layers:
+            self.out = layer(self.out)
+        return self.out
+
+    def parameters(self):
+        self.parameters = [p for layer in self.layers for p in self.parameters()]
+        return self.parameters
 
 
 
@@ -68,7 +105,7 @@ chars.insert(0, '.')
 stoi = {s:i for i, s in enumerate(chars)}
 itos = {i:s for i, s in enumerate(chars)}
 
-base_num = 3
+base_num = 8
 emb_size = 10
 
 batch_size = 32
@@ -110,15 +147,18 @@ Xtr, Ytr = build_dataset(words[:n1])
 Xdev,Ydev = build_dataset(words[n1:n2])
 Xte, Yte = build_dataset(words[n2:])
 
-n_hidden = 200
+n_hidden = 68
 max_steps= 200000
 
-C = torch.randn((len(chars), emb_size))
-layers = [Linear(emb_size* base_num,n_hidden, bias= False), BatchNorm1d(n_hidden), Tanh(), Linear(n_hidden, len(chars)),]
+model = Sequential([Embedding(len(chars), emb_size),
+                    FlattenConsecutive(2), Linear(emb_size * 2, n_hidden, bias= False), BatchNorm1d(n_hidden), Tanh(), 
+                    FlattenConsecutive(2), Linear(n_hidden * 2, n_hidden, bias= False), BatchNorm1d(n_hidden), Tanh(), 
+                    FlattenConsecutive(2), Linear(n_hidden * 2, n_hidden, bias= False), BatchNorm1d(n_hidden), Tanh(), 
+                    Linear(n_hidden , len(chars)),])
 with torch.no_grad():
-    layers[-1].weight *= 0.1
+    model.layers[-1].weight *= 0.1
 
-parameters = [C] + [parameter for layer in layers for parameter in layer.parameters()]
+parameters = [parameter for layer in model.layers for parameter in layer.parameters()]
 
 for parameter in parameters:
     parameter.requires_grad = True
@@ -128,11 +168,10 @@ for i in range(max_steps):
     ix = torch.randint(Xtr.shape[0], (batch_size,), generator=g)
     Xb, Yb = Xtr[ix], Ytr[ix]
 
-    
-    emb = C[Xb]
-    x = emb.view(emb.shape[0], -1)
-    for layer in layers:
+    x = Xb
+    for layer in model.layers:
         x = layer(x)
+        print(layer.__class__.__name__, ':', tuple(layer.out.shape))
     
     loss = F.cross_entropy(x, Yb)
     lossi.append(loss.log10().item())
@@ -145,12 +184,13 @@ for i in range(max_steps):
     lr = 0.1 if i < max_steps/2 else 0.01
     for p in parameters:
         p.data += -lr * p.grad
-
+    
     if i % 10000 == 0:
         print(f"{i:7_d}/{max_steps:7d}: {loss.item()}")
+    break
 
     
-for layer in layers:
+for layer in model.layers:
     layer.training = False
 
 def sample_name(C, W1, W2, B2, bngain, bnbias, bn_running_mean, bn_running_std):
@@ -158,9 +198,8 @@ def sample_name(C, W1, W2, B2, bngain, bnbias, bn_running_mean, bn_running_std):
         context = [0] * base_num
         out = []
         while True:
-            emb = C[torch.tensor(context)]
-            x = emb.view(emb.shape[0], -1)
-            for layer in layers:
+            x = torch.tensor(context)
+            for layer in model.layers:
                 x = layer(x)
             probs = F.softmax(x, dim=1)
             ix = torch.multinomial(probs, num_samples=1, replacement=True, generator=g).item()
@@ -177,9 +216,8 @@ def split_loss(split):
       'develop' : (Xdev, Ydev),
       'test' : (Xte, Yte)
    }[split]
-   emb = C[x]
-   x = emb.view(emb.shape[0], -1)
-   for layer in layers:
+
+   for layer in model.layers:
         x = layer(x)
 
    loss = F.cross_entropy(x, y)
@@ -188,4 +226,26 @@ print(split_loss('train'))
 print(split_loss('develop'))
 plt.plot(torch.tensor(lossi).view(-1, 1000).mean(1))
 plt.show()
-#3-character MLP: train ≈ 2.018, dev ≈ 2.323
+
+
+# 3-character MLP: train ≈ 2.018, dev ≈ 2.323
+# 8-character MLP: train ≈ 1.878, dev ≈ 2.245
+# Embedding : (32, 8, 10)
+# FlattenConsecutive : (32, 4, 20)
+# Linear : (32, 4, 68)
+# BatchNorm1d : (32, 4, 68)
+# Tanh : (32, 4, 68)
+# FlattenConsecutive : (32, 2, 136)
+# Linear : (32, 2, 68)
+# BatchNorm1d : (32, 2, 68)
+# Tanh : (32, 2, 68)
+# FlattenConsecutive : (32, 136)
+# Linear : (32, 68)
+# BatchNorm1d : (32, 68)
+# Tanh : (32, 68)
+# Linear : (32, 27)
+# Amacımız tüm önceki karakterlerden gelen bilgileri tek seferde sıkıştırmak yerine,
+# kademeli olarak ikişer ardışık karakterin bilgisini birleştirerek ilerlemek.
+# Bu sayede receptive field her katmanda büyüyor (2 -> 4 -> 8) ve daha uzak
+# geçmişteki karakterlerden gelen bilgileri daha az katmanla modele dahil edebiliyoruz.
+
