@@ -106,7 +106,7 @@ class Sequential():
 
 g = torch.Generator().manual_seed(42)
 
-words = open("names.txt", "r").read().splitlines()
+words = open("names_tr.txt", "r").read().splitlines()
 
 chars = sorted(set(''.join(words)))
 
@@ -177,7 +177,6 @@ for parameter in parameters:
 
 lossi = []
 for i in range(max_steps):
-    break
     ix = torch.randint(Xtr.shape[0], (batch_size,), generator=g)
     Xb, Yb = Xtr[ix], Ytr[ix]
 
@@ -198,19 +197,19 @@ for i in range(max_steps):
     for p in parameters:
         p.data += -lr * p.grad
     
-    if i % 10000 == 0:
-        print(f"{i:7_d}/{max_steps:7d}: {loss.item()}")
+    #if i % 10000 == 0:
+       # print(f"{i:7_d}/{max_steps:7d}: {loss.item()}")
 
     
 for layer in model.layers:
     layer.training = False
 
-def sample_name(C, W1, W2, B2, bngain, bnbias, bn_running_mean, bn_running_std):
+def sample_name():
     for _ in range(10):
         context = [0] * base_num
         out = []
         while True:
-            x = torch.tensor(context)
+            x = torch.tensor(context).view(1, -1)
             for layer in model.layers:
                 x = layer(x)
             probs = F.softmax(x, dim=1)
@@ -236,6 +235,7 @@ def split_loss(split):
    print(f"{split} ---> {loss.item()}")
 print(split_loss('train'))
 print(split_loss('develop'))
+sample_name()
 #plt.plot(torch.tensor(lossi).view(-1, 1000).mean(1))
 #plt.show()
 
@@ -304,5 +304,30 @@ ax.table(
     colLabels=["Model", "Parameter Count", "Dev Loss"],
     loc="center"
 )
+#
+#plt.show()
 
-plt.show()
+# Turkish Model Comparison
+#
+# Week 4 - 3-context MLP:      dev loss ≈ 2.329
+# Week 6 - 8-context WaveNet:  dev loss ≈ 2.312
+#
+# Sample generated names:
+# erminer
+# gülbey
+# akköl
+# gülser
+# alpay
+# cavsol
+# demirdoğa
+# nazlı
+# pesuzan
+# uçe
+#
+# Türkçe modelde context uzunluğunu 3'ten 8'e çıkarıp WaveNet yapısını
+# kullandığımızda dev loss 2.329'dan 2.312'ye düştü.
+# Bu yaklaşık 0.017'lik küçük bir iyileşme sağladı.
+# Daha uzun context sayesinde model, bir sonraki karakteri tahmin ederken
+# yalnızca son 3 karakter yerine son 8 karaktere kadar olan geçmiş bilgiyi
+# kullanabildi. Böylece özellikle daha uzun isimlerdeki karakter örüntülerini
+# ve bağımlılıklarını daha iyi modelleyebildi.
