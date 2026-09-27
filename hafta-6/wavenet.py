@@ -83,6 +83,12 @@ class FlattenConsecutive():
     def parameters(self):
         return []
 
+class Flatten():
+    def __call__(self, x):
+        self.out = x.view(x.shape[0], -1)
+        return self.out
+    def parameters(self):
+        return []
 class Sequential():
     def __init__(self, x):
         self.layers = x
@@ -158,17 +164,20 @@ model = Sequential([Embedding(len(chars), emb_size),
                     FlattenConsecutive(2), Linear(emb_size * 2, n_hidden, bias= False), BatchNorm1d(n_hidden), Tanh(), 
                     FlattenConsecutive(2), Linear(n_hidden * 2, n_hidden, bias= False), BatchNorm1d(n_hidden), Tanh(), 
                     FlattenConsecutive(2), Linear(n_hidden * 2, n_hidden, bias= False), BatchNorm1d(n_hidden), Tanh(), 
-                    Linear(n_hidden , len(chars)),])
+                    Linear(n_hidden , len(chars)),]) 
+
 with torch.no_grad():
     model.layers[-1].weight *= 0.1
 
 parameters = [parameter for layer in model.layers for parameter in layer.parameters()]
+print(sum(p.nelement() for p in parameters))
 
 for parameter in parameters:
     parameter.requires_grad = True
 
 lossi = []
 for i in range(max_steps):
+    break
     ix = torch.randint(Xtr.shape[0], (batch_size,), generator=g)
     Xb, Yb = Xtr[ix], Ytr[ix]
 
@@ -227,13 +236,15 @@ def split_loss(split):
    print(f"{split} ---> {loss.item()}")
 print(split_loss('train'))
 print(split_loss('develop'))
-plt.plot(torch.tensor(lossi).view(-1, 1000).mean(1))
-plt.show()
+#plt.plot(torch.tensor(lossi).view(-1, 1000).mean(1))
+#plt.show()
 
-
-# 3-character MLP: train ≈ 2.018, dev ≈ 2.323
-# 8-character MLP: train ≈ 1.878, dev ≈ 2.245
-# 8-character fixed batchnorm1d MLP: train ≈ 1.875, dev ≈ 2.238
+# hafta-4 3-character MLP:                   train ≈ 2.021, dev ≈ 2.329
+# 3-character MLP :                          train ≈ 2.018, dev ≈ 2.323 parameters: 12097
+# 8-character MLP:                           train ≈ 1.878, dev ≈ 2.245 parameters: 22097
+# 8-character wavenet:                       train ≈ 1.882, dev ≈ 2.251 
+# 8-character fixed batchnorm1d:             train ≈ 1.875, dev ≈ 2.238 parameters: 22397
+# 8-character 24 n_emb 128 n_hidden wavenet: train ≈ 1.743, dev ≈ 2.226
 
 # Embedding : (32, 8, 10)
 # FlattenConsecutive : (32, 4, 20)
@@ -276,3 +287,22 @@ plt.show()
 #
 # Before fix: dev loss ≈ 2.245
 # After fix:  dev loss ≈ 2.238
+
+model_name = ["3 MLP", "8 düz MLP", "8 WaveNet"]
+
+loss_model = [2.323,  2.245,  2.238]
+p_model = [12097, 22097, 22397]
+
+table_data = [[model_name[i], p_model[i], loss_model[i],] for i in range(len(model_name))]
+
+
+fig, ax = plt.subplots()
+
+ax.axis("off")
+ax.table(
+    cellText=table_data,
+    colLabels=["Model", "Parameter Count", "Dev Loss"],
+    loc="center"
+)
+
+plt.show()
