@@ -30,8 +30,12 @@ class BatchNorm1d:
 
     def __call__(self,x):
         if self.training:
-            xmean = x.mean(0, keepdim=True)
-            xvar = x.var(0, keepdim=True)
+            if x.ndim == 2:
+                dim = 0
+            elif x.ndim == 3:
+                dim = (0,1)
+            xmean = x.mean(dim, keepdim=True)
+            xvar = x.var(dim, keepdim=True)
         else:
             xmean = self.running_mean
             xvar = self.running_var
@@ -171,7 +175,7 @@ for i in range(max_steps):
     x = Xb
     for layer in model.layers:
         x = layer(x)
-        print(layer.__class__.__name__, ':', tuple(layer.out.shape))
+        
     
     loss = F.cross_entropy(x, Yb)
     lossi.append(loss.log10().item())
@@ -187,7 +191,6 @@ for i in range(max_steps):
     
     if i % 10000 == 0:
         print(f"{i:7_d}/{max_steps:7d}: {loss.item()}")
-    break
 
     
 for layer in model.layers:
@@ -230,6 +233,8 @@ plt.show()
 
 # 3-character MLP: train ≈ 2.018, dev ≈ 2.323
 # 8-character MLP: train ≈ 1.878, dev ≈ 2.245
+# 8-character fixed batchnorm1d MLP: train ≈ 1.875, dev ≈ 2.238
+
 # Embedding : (32, 8, 10)
 # FlattenConsecutive : (32, 4, 20)
 # Linear : (32, 4, 68)
@@ -249,3 +254,25 @@ plt.show()
 # Bu sayede receptive field her katmanda büyüyor (2 -> 4 -> 8) ve daha uzak
 # geçmişteki karakterlerden gelen bilgileri daha az katmanla modele dahil edebiliyoruz.
 
+
+# BatchNorm1d ilk yazıldığında girdisi Flatten ile 2D bir tensöre dönüştürülüyordu.
+# Ancak FlattenConsecutive kullanmaya başladıktan sonra BatchNorm1d'ye
+# (batch, context, feature) şeklinde 3D tensorlar da gelmeye başladı.
+#
+# Örneğin ilk BatchNorm'a (32, 4, 68) boyutunda bir tensor geliyor:
+# 32 -> batch size
+# 4  -> context pozisyonu
+# 68 -> neuron/feature sayısı
+#
+# BatchNorm her bir neuron için batch ve context boyunca ortalama almalıdır.
+# Yani her neuron için 32 * 4 = 128 değerden tek bir mean ve variance hesaplanmalıdır.
+#
+# Sadece dim=0 üzerinden ortalama aldığımızda context dimensionı korunuyordu.
+# Bu yüzden her neuron için tek bir ortalama yerine 4 farklı ortalama elde ediyorduk.
+#
+# Bunu düzeltmek için input 2D ise dim=0,
+# input 3D ise dim=(0, 1) üzerinden mean ve variance hesapladık.
+# Böylece her neuron/feature için tek bir mean ve variance elde edilmiş oldu.
+#
+# Before fix: dev loss ≈ 2.245
+# After fix:  dev loss ≈ 2.238
