@@ -1,0 +1,5 @@
+Görev1:
+Base val loss = 2.6305
+
+Görev 2:
+Biz bir sonraki karakteri hesaplarken kendinen önceki tüm karakterlere bakabilmek istiyoruz. şuan mevcut karakter sayımızda bir matrix oluşturuyoruz (T,T) sonrasında bu karakterlerden bakmasına izin vermeyi 1 olarak düşünelim bakma demeyi 0 ben 8 karakterden ilkinin sadece kendine bakmasını istiyorum diğerinin kendi ve 1ciye derken üçgen şeklinde bir izin tablosu oluşuyor. Bunu da a = torch.tril(torch.ones(T,T)) ile oluşturuyorum. Bir sonraki soru ise tamam ben nelere bakacağını buldum ama ne ağırlıkta bakacak? Eğer 3 elemente bakıyorsa bunların ortalamasını alması lazım olduğu için a = a / a.sum(1, keepdim=True) burada amacım tamam ben kendimden önceki 4 karakterin channellarına bakacağım ve bu channel lardan aldığım ortalamayı yeni karakterin channelı yapacağım. şimdi elimde ağırlıklı izin tablosu a var ve channel değerlerinin tutulduğu x ben bu weightlerle ağırlıklı tabloyu çarparsam istediğim karakterin kendinden önceki karakterlere bakarak elde ettiği yeni channel değerlerineulaşırım.
