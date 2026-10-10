@@ -184,3 +184,5 @@ for iteration in range(max_iterations):
 
 context = torch.zeros((1, 1), dtype=torch.long, device=device)
 print(decode(m.generate(context, max_new_tokens=2000)[0].tolist()))
+
+#train loss: 1.865940809249878,  val loss: 2.070422887802124
