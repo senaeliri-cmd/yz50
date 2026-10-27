@@ -79,7 +79,6 @@ class ChatGPTConfig:
     n_layer: int = 12
     n_embd: int = 768
 
-
 class ChatGPT(nn.Module):
     def __init__(self, config):
         super().__init__()
@@ -92,12 +91,12 @@ class ChatGPT(nn.Module):
             ln_f=nn.LayerNorm(config.n_embd)
         ))
 
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
-
-        # Weight tying
+        self.lm_head = nn.Linear(
+            config.n_embd, config.vocab_size, bias=False
+        )
         self.lm_head.weight = self.transformer.wte.weight
 
-    def forward(self, idx):
+    def forward(self, idx, targets=None):
         B, T = idx.shape
 
         assert T <= self.config.block_size
@@ -115,7 +114,14 @@ class ChatGPT(nn.Module):
         x = self.transformer.ln_f(x)
         logits = self.lm_head(x)
 
-        return logits
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(
+                logits.reshape(-1, logits.size(-1)),
+                targets.reshape(-1)
+            )
+
+        return logits, loss
 
     @classmethod
     def from_pretrained(cls, model_type):
@@ -173,39 +179,71 @@ class ChatGPT(nn.Module):
 
         return model
 
-max_return_sequences = 5
-max_length = 30
-
-model = ChatGPT.from_pretrained('gpt2')
-model.eval()
-
-torch.manual_seed(42)
-
-max_tokens = 5000
 
 import tiktoken
 
-enc = tiktoken.get_encoding('gpt2')
-tokens = enc.encode('Selam ben bir dil modeliyim!')
-tokens = torch.tensor(tokens, dtype=torch.long)
-x = tokens.unsqueeze(0).repeat(max_return_sequences, 1)
+# Device
+device = "mps" if torch.backends.mps.is_available() else "cpu"
+print("Using device:", device)
+
+torch.manual_seed(42)
+
+# Dataset
+with open("input.txt", "r", encoding="utf-8") as f:
+    text = f.read()
+
+enc = tiktoken.get_encoding("gpt2")
+tokens = enc.encode(text)
+data = torch.tensor(tokens, dtype=torch.long)
+
+# Batch parameters
+B, T = 4, 32
+
+if len(data) <= T:
+    raise ValueError("Dataset çok kısa. Daha fazla token gerekiyor.")
+
+def get_batch():
+    ix = torch.randint(0, len(data) - T, (B,))
+
+    x = torch.stack([data[i:i+T] for i in ix])
+    y = torch.stack([data[i+1:i+T+1] for i in ix])
+
+    return x.to(device), y.to(device)
 
 
+# Model
+config = ChatGPTConfig(
+    block_size=128,
+    n_layer=4,
+    n_head=4,
+    n_embd=256
+)
 
-while x.size(1) < max_length:
-    with torch.no_grad():
-        logits = model(x)
-        logits = logits[:, -1, :]
+model = ChatGPT(config).to(device)
+model.train()
 
-        probs = F.softmax(logits, dim=-1)
-        topk_probs, topk_indices = torch.topk(probs, 50, dim=-1)
+# Optimizer
+optimizer = torch.optim.AdamW(
+    model.parameters(),
+    lr=3e-4
+)
 
-        ix = torch.multinomial(topk_probs, 1)
-        xcol = torch.gather(topk_indices, -1, ix)
+# Training
+max_steps = 200
 
-        x = torch.cat((x, xcol), dim=1)
+for step in range(max_steps):
 
-for i in range(max_return_sequences):
-    tokens = x[i, :max_length].tolist()
-    decoded = enc.decode(tokens)
-    print(">", decoded)
+    x, y = get_batch()
+
+    optimizer.zero_grad(set_to_none=True)
+
+    logits, loss = model(x, y)
+
+    loss.backward()
+
+    optimizer.step()
+
+    if step % 20 == 0:
+        print(f"Step {step} | Loss: {loss.item():.4f}")
+
+print("Training complete!")
