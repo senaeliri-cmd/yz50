@@ -251,7 +251,7 @@ config = ChatGPTConfig(
 )
 
 model = ChatGPT(config).to(device)
-model = torch.compile(model)
+#model = torch.compile(model)
 num_params = sum(p.numel() for p in model.parameters())
 print(f"Number of parameters: {num_params:,}")
 print(f"Parameters in millions: {num_params / 1e6:.2f}M")
@@ -260,8 +260,8 @@ x, y = train_loader.next_batch()
 x, y = x.to(device), y.to(device)
 
 model.eval()
-with torch.no_grad():
-    logits, loss = model(x, y)
+#with torch.no_grad():
+logits, loss = model(x, y)
 
 print(f"Initial loss: {loss.item():.4f}")
 print(f"Expected loss: {math.log(50257):.4f}")
@@ -270,7 +270,7 @@ print(f"Expected loss: {math.log(50257):.4f}")
 model.train()
 
 optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
-scaler = torch.amp.GradScaler("cuda")
+#scaler = torch.amp.GradScaler("cuda")
 
 step_times = []
 max_steps = 60
@@ -285,12 +285,15 @@ for step in range(max_steps):
     optimizer.zero_grad(set_to_none=True)
 
     # FP16 Mixed Precision
-    with torch.autocast(device_type="cuda", dtype=torch.float16):
-        logits, loss = model(x, y)
+    #with torch.autocast(device_type="cuda", dtype=torch.float16):
+    logits, loss = model(x, y)
 
-    scaler.scale(loss).backward()
-    scaler.step(optimizer)
-    scaler.update()
+#    scaler.scale(loss).backward()
+ #   scaler.step(optimizer)
+  #  scaler.update()
+
+    loss.backward()
+    optimizer.step()
 
     torch.cuda.synchronize()
     dt = (time.perf_counter() - t0) * 1000
