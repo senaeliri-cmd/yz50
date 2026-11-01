@@ -43,7 +43,9 @@ class CausalSelfAttention(nn.Module):
         y = self.c_proj(y)
 
         return y
-
+class TanhGELU(nn.Module):
+  def forward(self, x):
+    return 0.5 * x * (1.0 + torch.tanh(math.sqrt((2.0 / math.pi)* (x + 0.44715 * torch.pow(x, 3.0)))))
 
 class MLP(nn.Module):
     def __init__(self, config):
@@ -99,7 +101,6 @@ class ChatGPT(nn.Module):
             config.n_embd, config.vocab_size, bias=False
         )
         self.lm_head.weight = self.transformer.wte.weight
-        self.apply(self._init_weights)
 
         # weight share scheme
         self.transformer.wte.weight = self.lm_head.weight
@@ -110,7 +111,7 @@ class ChatGPT(nn.Module):
     def _init_weights(self, module):
         if isinstance(module, nn.Linear):
             std = 0.02
-            if(hasattr(module, "NANO_GPT_SCALE")):
+            if(hasattr(module, "NANOGPT_SCALE_INIT")):
                 std *= (2 * self.config.n_layer) ** -0.5
             torch.nn.init.normal_(module.weight, mean=0.0, std=std)
 
@@ -220,7 +221,7 @@ class DataLoaderLite:
         B, T = self.B, self.T
         buf = self.tokens[self.current_pos : self.current_pos + B*T + 1]
 
-        self.current_pos += B * T + 1
+        self.current_pos += B * T
 
         x = buf[:-1].view(B, T)
         y = buf[1:].view(B, T)
@@ -234,21 +235,26 @@ class DataLoaderLite:
 import time
 
 device = "mps" if torch.backends.mps.is_available() else "cpu"
+device = "cuda" if torch.cuda.is_available() else device
 print("Using device:", device)
 
 torch.manual_seed(42)
 
-train_loader = DataLoaderLite(B=4, T=32)
+train_loader = DataLoaderLite(B=8, T=1024)
+torch.set_float32_matmul_precision('highest')
 
 config = ChatGPTConfig(
-    block_size=128,
+    block_size=1024,
     n_layer=4,
     n_head=4,
     n_embd=256
 )
 
 model = ChatGPT(config).to(device)
-
+model = torch.compile(model)
+num_params = sum(p.numel() for p in model.parameters())
+print(f"Number of parameters: {num_params:,}")
+print(f"Parameters in millions: {num_params / 1e6:.2f}M")
 
 x, y = train_loader.next_batch()
 x, y = x.to(device), y.to(device)
@@ -263,31 +269,41 @@ print(f"Expected loss: {math.log(50257):.4f}")
 # Training
 model.train()
 
-optimizer = torch.optim.AdamW(
-    model.parameters(),
-    lr=3e-4
-)
+optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
+scaler = torch.amp.GradScaler("cuda")
 
-max_steps = 600
-   
-import code; code.interact(local=locals())
+step_times = []
+max_steps = 60
+
 for step in range(max_steps):
-    t0 = time.time()
+    torch.cuda.synchronize()
+    t0 = time.perf_counter()
+
     x, y = train_loader.next_batch()
     x, y = x.to(device), y.to(device)
+
     optimizer.zero_grad(set_to_none=True)
-    logits, loss = model(x, y)
-    
-    loss.backward()
 
-    optimizer.step()
+    # FP16 Mixed Precision
+    with torch.autocast(device_type="cuda", dtype=torch.float16):
+        logits, loss = model(x, y)
+
+    scaler.scale(loss).backward()
+    scaler.step(optimizer)
+    scaler.update()
+
     torch.cuda.synchronize()
-    t1 = time.time()
-    dt = (t1-t0) * 1000
+    dt = (time.perf_counter() - t0) * 1000
 
-    
+    if step >= 10:
+        step_times.append(dt)
 
-    if step % 50 == 0:
-        print(f"Step {step} | Loss: {loss.item():.4f}")
+    if step % 10 == 0:
+        print(f"Step {step} | Loss: {loss.item():.4f} | dt: {dt:.2f} ms")
+
+avg_dt = sum(step_times) / len(step_times)
+tok_per_sec = train_loader.B * train_loader.T / (avg_dt / 1000)
 
 print("Training complete!")
+print(f"Average step time: {avg_dt:.2f} ms")
+print(f"Tokens/sec: {tok_per_sec:.0f}")
