@@ -1,6 +1,7 @@
 
 import math
 from dataclasses import dataclass
+import inspect
 
 import torch
 import torch.nn as nn
@@ -34,11 +35,12 @@ class CausalSelfAttention(nn.Module):
         k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
         v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
 
-        att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
-        att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float("-inf"))
-        att = F.softmax(att, dim=-1)
+        #att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+        #att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float("-inf"))
+        #att = F.softmax(att, dim=-1)
 
-        y = att @ v
+        #y = att @ v
+        y = F.scaled_dot_product_attention(q, k, v, is_causal=True)
         y = y.transpose(1, 2).contiguous().view(B, T, C)
         y = self.c_proj(y)
 
@@ -203,6 +205,33 @@ class ChatGPT(nn.Module):
                     sd[k].copy_(sd_hf[k])
 
         return model
+    def congigure_optimizers(self, weight_decay, learning_rate, device): 
+      param_dict = {pn: p for pn, p in self.named_parameters()}
+      param_dict = {pn: p for pn, p in param_dict.items() if p.requires_grad}
+
+      decay_params = [p for n, p in param_dict.items() if p.dim() >= 2]
+      nodecay_params = [p for n, p in param_dict.items() if p.dim() < 2]
+
+      
+
+      optim_groups = [
+          { 'params' : decay_params, 'weight_decay' : weight_decay},
+          { 'params' : nodecay_params, 'weight_decay' : 0.0}
+      ]
+
+      num_decay_params = sum(p.numel() for p in decay_params)
+      num_nodecay_params = sum(p.numel() for p in nodecay_params)
+
+      print(f"Decayed parameters: {num_decay_params:,}")
+      print(f"Non-decayed parameters: {num_nodecay_params:,}")
+      
+      fused_available = 'fused' in inspect.signature(torch.optim.AdamW).parameters
+      use_fuse = fused_available and device == 'cuda'
+
+      
+      optimizer = torch.optim.AdamW(optim_groups, lr=learning_rate, betas=(0.9, 0.95), eps=1e-8, fused=use_fuse)
+      return optimizer
+                                    
 
 import tiktoken
 class DataLoaderLite:
@@ -230,7 +259,6 @@ class DataLoaderLite:
             self.current_pos = 0
         
         return x, y
-
 # Device
 import time
 
@@ -239,15 +267,22 @@ device = "cuda" if torch.cuda.is_available() else device
 print("Using device:", device)
 
 torch.manual_seed(42)
+total_batch_size = 524288
+B=8
+T=1024
 
-train_loader = DataLoaderLite(B=8, T=1024)
+assert total_batch_size % (B*T) == 0, "total_batch_size must be divisible by B*T"
+grad_acum_steps = total_batch_size // (B*T)
+
+train_loader = DataLoaderLite(B=B, T=T)
 torch.set_float32_matmul_precision('highest')
 
 config = ChatGPTConfig(
     block_size=1024,
     n_layer=4,
     n_head=4,
-    n_embd=256
+    n_embd=256,
+    vocab_size=50304
 )
 
 model = ChatGPT(config).to(device)
@@ -269,8 +304,25 @@ print(f"Expected loss: {math.log(50257):.4f}")
 # Training
 model.train()
 
-optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4)
-scaler = torch.amp.GradScaler("cuda")
+#optimizer = torch.optim.AdamW(model.parameters(), lr=3e-4, betas=(0.9, 0.95), eps=1e-8)
+optimizer = model.congigure_optimizers(weight_decay=0.1, learning_rate=6e-4, device=device)
+
+max_lr = 3e-4
+min_lr= max_lr * 0.1
+warmup_steps = 10
+max_steps = 50
+
+def get_lr(it):
+  
+  if it < warmup_steps:
+    return max_lr * (it+1) / warmup_steps
+  if it > max_steps:
+    return min_lr
+  decay_ratio = it-warmup_steps
+  decay_ratio /= (max_steps-warmup_steps)
+  assert 0 <= decay_ratio <= 1
+  coeff = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+  return min_lr + coeff * (max_lr - min_lr)
 
 step_times = []
 max_steps = 60
@@ -279,34 +331,58 @@ for step in range(max_steps):
     torch.cuda.synchronize()
     t0 = time.perf_counter()
 
-    x, y = train_loader.next_batch()
-    x, y = x.to(device), y.to(device)
+   
 
     optimizer.zero_grad(set_to_none=True)
+    loss_accum = torch.zeros((), device=device)
+    
+    for micro_step in range(grad_acum_steps):
+      x, y = train_loader.next_batch()
+      x, y = x.to(device), y.to(device)
+      with torch.autocast(device_type=device, dtype=torch.float16):
+        logits, loss = model(x, y)
+      loss = loss / grad_acum_steps
+      loss_accum += loss.detach() 
+      loss.backward()
 
     # FP16 Mixed Precision
     with torch.autocast(device_type="cuda", dtype=torch.float16):
         logits, loss = model(x, y)
 
-    scaler.scale(loss).backward()
-    scaler.step(optimizer)
-    scaler.update()
-
     loss.backward()
-    optimizer.step()
 
-    torch.cuda.synchronize()
+    norm = torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+
+    lr = get_lr(step)
+    for param_group in optimizer.param_groups:
+        param_group['lr'] = lr 
+    optimizer.step()
+    
+    torch.cuda.synchronize() # wait for GPU to finish
     dt = (time.perf_counter() - t0) * 1000
 
     if step >= 10:
         step_times.append(dt)
 
     if step % 10 == 0:
-        print(f"Step {step} | Loss: {loss.item():.4f} | dt: {dt:.2f} ms")
+        print(f"Step {step} | Loss: {loss.item():.4f} | lr: {lr:.6f}| norm: {norm:.4f} |dt: {dt:.2f} ms")
 
 avg_dt = sum(step_times) / len(step_times)
-tok_per_sec = train_loader.B * train_loader.T / (avg_dt / 1000)
+tokens_processed = train_loader.B * train_loader.T * grad_acum_steps
+tok_per_sec = tokens_processed  / (avg_dt / 1000)
 
 print("Training complete!")
 print(f"Average step time: {avg_dt:.2f} ms")
 print(f"Tokens/sec: {tok_per_sec:.0f}")
+
+import matplotlib.pyplot as plt
+
+steps = list(range(max_steps))
+learning_rates = [get_lr(step) for step in steps]
+
+plt.plot(steps, learning_rates)
+plt.xlabel("Training Step")
+plt.ylabel("Learning Rate")
+plt.title("Warmup + Cosine Learning Rate Schedule")
+plt.grid(True)
+plt.show()
